@@ -1,0 +1,76 @@
+---
+title: "Project1_6372_407"
+author: "yleung"
+date: "January 31, 2019"
+output: html_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=12, fig.height=8) 
+```
+
+## R Libraries
+
+```{r load-packages, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(PerformanceAnalytics)
+library(MASS)
+library(glmnet)
+```
+
+## Import Data Set
+####https://www.kaggle.com/uciml/red-wine-quality-cortez-et-al-2009
+```{r wine-data}
+#Need to change the file pathway to your own working directory
+wine<-read.csv(file="C:\\Users\\Yat\\Documents\\MSDS_6372_Applied_Statistics\\winequality-red.csv")
+```
+
+
+##EDA on wine
+```{r wine-eda}
+Chemical.Attributes<-wine[, c(1,2,3,4,5,6,7,12)]
+Measurements.Attributes<-wine[,c(8,9,10,11,12)]
+#Chemical Attributes Correlation to Wine Quality
+chart.Correlation(Chemical.Attributes, histogram=TRUE, pch=15)
+#Measured Attributes Correlation to Wine Quality
+chart.Correlation(Measurements.Attributes, histogram=TRUE, pch=15)
+
+#Total and free sulfur dioxide were covariate variables, neither one was positively correlated to the quality of wine.
+#Fixed and volatile acidity were covariate variables, however fixed acidity was positively correlated to citric acid,
+#whereas citric acid was weakly correlated to quality.
+#Both Fixed acidity and Citric acid were right skewed however with over 1000 data points in the set, the CLT could be used
+#to ssuggest the data could be normally distibuted.
+
+#In the measured attributes, only the sulphates and alcohol content were weakly and positively correlated to the quality of wine.
+
+#In here, again we see that the alcohol and sulphates were right skewed however we could use CLT to suggest that these
+#data sets could be normally distributed.
+
+#Fitting all variables to a simple linear regression model.
+```
+
+```{r GLM-Model}
+#See https://www.theanalysisfactor.com/r-glm-model-fit/ for explanations
+#GLM using all available variables
+wine.full.quality.LM<-glm(quality~fixed.acidity+volatile.acidity+ citric.acid+residual.sugar+chlorides+free.sulfur.dioxide+total.sulfur.dioxide+density+pH+sulphates+ alcohol, data=wine)
+wine.full.quality.LM
+plot(wine.full.quality.LM)
+summary(wine.full.quality.LM)
+
+#ANOVA-all variables
+anova(wine.full.quality.LM)
+
+
+```
+
+```{r lasso-model}
+Wine.X<-wine[,-which(names(wine) == "quality")] 
+Wine.Y<-wine$quality
+x<-as.matrix(data.frame(Wine.X))
+y<-as.factor(Wine.Y)
+lasso.wine<-glmnet(x,y,family="binomial", alpha=1 )
+```
+
