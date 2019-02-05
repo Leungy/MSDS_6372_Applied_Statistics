@@ -1,0 +1,57 @@
+data wine;
+	infile '/home/yleung2/6372 HW/6372Project1/winequality-red.csv' dlm=';' firstobs=2;
+	input fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_sulfur_dioxide total_sulfur_dioxide density pH Sulphates alcohol quality;
+run;
+/*proc print;run;*/
+
+proc univariate data=wine plots;
+var fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_sulfur_dioxide total_sulfur_dioxide density pH Sulphates alcohol quality;
+run;
+
+proc glm data = wine PLOTS=(DIAGNOSTICS RESIDUALS);
+class fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_sulfur_dioxide total_sulfur_dioxide density pH Sulphates alcohol;
+model quality= fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_sulfur_dioxide total_sulfur_dioxide density pH Sulphates alcohol;
+run;
+
+data wine2;                                                                                                                                                                                                               
+set wine;                                                                                                                                                                                                                 
+RandNumber = ranuni(11);                                                                                                                                                                                                  
+quality = quality                                                                                                                                                                                                    
+; 
+
+data train;                                                                                                                                                                                                              
+set wine2;  
+if RandNumber <= 1/4 then delete;                                                                                                                                                                                         
+run;                                                                                                                                                                                                                     
+                                                                                                                                                                                                                         
+                                                                                                                                                                                                                         
+data test;                                                                                                                                                                                                               
+set wine2;     
+if RandNumber > 1/4 then delete;                                                                                                                                                                                         
+run;                                                                                                                                                                                                                     
+
+/*                                                                                                                                                                                                                         
+proc print data = train;                                                                                                                                                                                                  
+run;          
+
+proc print data = test;
+run;
+*/
+
+ods graphics on;                                                                                                                                                                                                         
+proc glmselect data=train testdata = test                                                                                                                                                                            
+               seed=1 plots(stepAxis=number)=(criterionPanel ASEPlot CRITERIONPANEL);                                                                                                                                    
+model quality= fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_sulfur_dioxide total_sulfur_dioxide density pH Sulphates alcohol / selection=LASSO( choose=CV stop=CV) CVdetails  ;                                                                                                                                                                                                                                              
+run;                                                                                                                                                                                                                     
+quit;                                                                                                                                                                                                                    
+ods graphics off;
+
+/*Model Averaging for LASSO with 95% CL on the regressors*/
+ods graphics on; 
+Title "Model Averaging for LASSO with 95% CL on the regressors";
+proc glmselect data=train testdata = test seed=3 plots=(EffectSelectPct ParmDistribution);
+   model quality=  alcohol volatile_acidity Sulphates total_sulfur_dioxide chlorides pH free_sulfur_dioxide  / selection=LASSO( adaptive stop=none choose=SBC) ;
+   modelAverage tables=(EffectSelectPct(all) ParmEst(all))  alpha=0.05;
+run;
+quit;
+ods graphics off;
