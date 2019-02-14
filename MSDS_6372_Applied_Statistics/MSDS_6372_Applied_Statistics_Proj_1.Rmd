@@ -3,74 +3,146 @@ title: "Project1_6372_407"
 author: "yleung"
 date: "January 31, 2019"
 output: html_document
-
+fig_width: 6 
+fig_height: 4 
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_chunk$set(fig.width=12, fig.height=8) 
-```
-
-## R Libraries
-
+#### R Libraries
 ```{r load-packages, message=FALSE}
-library(dplyr)
+library(tidyverse)
 library(ggplot2)
 library(PerformanceAnalytics)
-library(MASS)
+library(caret)
 library(glmnet)
+library(readr)
+library(qpcR)
+library(lsmeans)
 ```
 
-## Import Data Set
-####https://www.kaggle.com/uciml/red-wine-quality-cortez-et-al-2009
+#### Import Data Set
+######https://www.kaggle.com/uciml/red-wine-quality-cortez-et-al-2009
 ```{r wine-data}
 #Need to change the file pathway to your own working directory
-wine<-read.csv(file="C:\\Users\\Yat\\Documents\\MSDS_6372_Applied_Statistics\\winequality-red.csv")
+wine<-read.csv(file="C:\\Users\\Yat\\Documents\\MSDS\\MSDS 6372\\Project 1\\MSDS_6372_Applied_Statistics\\winequality-red.csv")
 ```
 
 
-##EDA on wine
-```{r wine-eda}
-Chemical.Attributes<-wine[, c(1,2,3,4,5,6,7,12)]
-Measurements.Attributes<-wine[,c(8,9,10,11,12)]
-#Chemical Attributes Correlation to Wine Quality
-chart.Correlation(Chemical.Attributes, histogram=TRUE, pch=15)
-#Measured Attributes Correlation to Wine Quality
-chart.Correlation(Measurements.Attributes, histogram=TRUE, pch=15)
-
-#Total and free sulfur dioxide were covariate variables, neither one was positively correlated to the quality of wine.
-#Fixed and volatile acidity were covariate variables, however fixed acidity was positively correlated to citric acid,
-#whereas citric acid was weakly correlated to quality.
-#Both Fixed acidity and Citric acid were right skewed however with over 1000 data points in the set, the CLT could be used
-#to ssuggest the data could be normally distibuted.
-
-#In the measured attributes, only the sulphates and alcohol content were weakly and positively correlated to the quality of wine.
-
-#In here, again we see that the alcohol and sulphates were right skewed however we could use CLT to suggest that these
-#data sets could be normally distributed.
-
-#Fitting all variables to a simple linear regression model.
+####Data summary and correlation chart on wine quality
+```{r plot-wine}
+summary(wine)
+chart.Correlation(wine, histogram=TRUE, pch=15)
 ```
 
-```{r GLM-Model}
+```{r Full-GLM-Model}
 #See https://www.theanalysisfactor.com/r-glm-model-fit/ for explanations
-#GLM using all available variables
+
+#GLM for data set wine
 wine.full.quality.LM<-glm(quality~fixed.acidity+volatile.acidity+ citric.acid+residual.sugar+chlorides+free.sulfur.dioxide+total.sulfur.dioxide+density+pH+sulphates+ alcohol, data=wine)
 wine.full.quality.LM
+
+#Diagnostic plots
 plot(wine.full.quality.LM)
+
+#Summary of the linear regression model
 summary(wine.full.quality.LM)
 
-#ANOVA-all variables
+#ANOVA of full model prior log transformation
 anova(wine.full.quality.LM)
+
+```
+
+```{r Log-Transformation}
+#Log transform fixed.acidity,free.sulfur.dioxide,total.sulfur.dioxide. Observed right skewness in the initial plot.
+
+#Log transform each of the variables above, then pull the others from the orginal list and then cbind them with new headers
+Log.fixed.acidity<-data.frame(log(wine$fixed.acidity))
+Log.free.sulfur.dioxide<-data.frame(log(wine$free.sulfur.dioxide))
+Log.total.sulfur.dioxide<-data.frame(log(wine$total.sulfur.dioxide))
+
+#Summary data for the 3 variables after log transform
+summary(Log.fixed.acidity)
+summary(Log.free.sulfur.dioxide)
+summary(Log.total.sulfur.dioxide)
+
+#rename header for each of the 3 data frames
+
+#Make Data set wine 2 from data set wine
+wine2<-wine
+
+#replace the values using the log transformed values
+wine2$fixed.acidity<-Log.fixed.acidity
+wine2$free.sulfur.dioxide<-Log.free.sulfur.dioxide
+wine2$total.sulfur.dioxide<-Log.total.sulfur.dioxide
+
+#GLM for data set wine 2
+wine2.full.quality.LM<-glm(quality~fixed.acidity+volatile.acidity+ citric.acid+residual.sugar+chlorides+free.sulfur.dioxide+total.sulfur.dioxide+density+pH+sulphates+ alcohol, data=wine)
+wine2.full.quality.LM
+plot(wine2.full.quality.LM)
+summary(wine2.full.quality.LM)
+
+#ANOVA of post log transformation of variables (data set wine 2)
+anova(wine2.full.quality.LM)
+
+```
+
+
+```{r glmnet-lasso-prediction}
+#Need to find AIC and PRESS packages to find the test stat.
+#Read Elastic Net online, a middle of the road test that's between Ridge and Lasso.
+#Predict Quality of wine.
+
+# Split the data into training and test set
+set.seed(123)
+training.samples <- wine$quality %>%  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- wine[training.samples, ]
+test.data <- wine[-training.samples, ]
+
+# Predictor variables
+x <- model.matrix(quality~., train.data)[,-1]
+# Outcome variable
+y <- train.data$quality
+
+LassoFit.Orig<-glmnet(x, y, alpha = 1, lambda = NULL)
+
+plot(LassoFit.Orig)
+
+# Find the best lambda using cross-validation
+set.seed(123) 
+cv <- cv.glmnet(x, y, alpha = 1)
+# Display the best lambda value
+cv$lambda.min
+
+# Fit the final model on the training data
+model <- glmnet(x, y, alpha = 1, lambda = cv$lambda.min)
+
+
+# Display regression coefficients
+coef(model)
+
+# Make predictions on the test data
+x.test <- model.matrix(quality~., test.data)[,-1]
+predictions <- model %>% predict(x.test) %>% as.vector()
+# Model performance metrics
+data.frame(
+  RMSE = RMSE(predictions, test.data$quality),
+  Rsquare = R2(predictions, test.data$quality)
+)
+
 
 
 ```
 
-```{r lasso-model}
-Wine.X<-wine[,-which(names(wine) == "quality")] 
-Wine.Y<-wine$quality
-x<-as.matrix(data.frame(Wine.X))
-y<-as.factor(Wine.Y)
-lasso.wine<-glmnet(x,y,family="binomial", alpha=1 )
+
+```{r glmnet-lasso-prediction-2}
+#Perform Lasso on the transformed data set
+
+# Make predictions on the test data
+x.test <- model.matrix(quality ~., test.data)[,-1]
+predictions <- model %>% predict(x.test) %>% as.vector()
+# Model performance metrics
+data.frame(
+  RMSE = RMSE(predictions, test.data$quality),
+  Rsquare = R2(predictions, test.data$quality)
+)
 ```
 
