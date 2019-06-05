@@ -1,0 +1,268 @@
+---
+title: "Project2"
+author: "yleung"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## R Libraries
+```{r libraries,results='hide', message=FALSE, warning=FALSE}
+library(readxl)
+library(tidyverse)
+library(aod)
+library(caret)
+library(glmnet)
+library(corrplot)
+library(MASS)
+library(regclass)
+library(FactoMineR)
+library(factoextra)
+library(pROC)
+library(psych)
+```
+
+##Import Data & ETL
+```{r Import-Data-ETL}
+xlsx_kobe <- read_excel("C:\\Users\\Yat\\Documents\\MSDS\\MSDS 6372\\Project 2\\project2Data.xlsx")
+
+#Take out an ID column from when data was imported
+kobe<-xlsx_kobe[,c(2:29)]
+
+#Re-code the character columns into factors
+kobe<-as.data.frame(unclass(kobe))
+kobe$shot_made_flag<-as.factor(kobe$shot_made_flag)
+kobe$shot_made_flag <-factor(kobe$shot_made_flag , levels=c(0,1), labels=c("No", "Yes"))
+kobe$shot_type<-as.factor(kobe$shot_type)
+kobe$shot_zone_area<-as.factor(kobe$shot_zone_area)
+kobe$shot_zone_basic<-as.factor(kobe$shot_zone_basic)
+kobe$shot_zone_range<-as.factor(kobe$shot_zone_range)
+kobe$game_date<-as.factor(kobe$game_date)
+kobe$season<-as.factor(kobe$season)
+kobe$period<-as.factor(kobe$period) #change period into factor?
+kobe$playoffs<-as.factor(kobe$playoffs)
+kobe$playoffs <-factor(kobe$playoffs , levels=c(0,1), labels=c("No", "Yes"))
+#subsetting variables (sans IDs)
+kobe<-kobe[,c(1:2,5:20,22:25,27:28)]
+kobe<-na.omit(kobe)
+
+
+#data check
+head(kobe)
+summary(kobe)
+str(kobe)
+```
+
+Since the loc_x and loc_y have either 0 or negative values, logarithmic transformation would not be feasible.This also applied to minutes_remaining , seconds_remaining and shot_distance.
+*did not look into Cook's D, perhaps there are outlying points?
+
+```{r prin-comp}
+#numerical variables
+kobe.NV<-kobe[,c(3:7,11:12,23:24)]
+kobe.NV<-na.omit(kobe.NV)
+fit<-prcomp(~., data=kobe.NV, cor=TRUE)
+summary(fit) # print variance accounted for 
+loadings(fit) # pc loadings 
+plot(fit,type="lines") # scree plot 
+fit$scores # the principal components
+biplot(fit,expand=10, xlim=c(-0.15, 0.05), ylim=c(-0.1, 0.05))
+
+# Varimax Rotated Principal Components
+# Extract, rotate and retain 5 PCs 
+component.retained <- principal(kobe.NV, nfactors=5, rotate="varimax")
+component.retained
+
+
+# Principal Axis Factor Analysis
+axis.fit <- factor.pa(kobe.NV, 5)
+axis.fit
+
+#PCA
+res.pca1 <- prcomp(kobe.NV, scale = TRUE)
+fviz_eig(res.pca1)
+
+fviz_pca_var(res.pca1,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+
+#Contingency Tables
+```{r contingency-tbls}
+#contingency table samples. coordination variables not included due to large computation time.
+list.of.xtabs <- lapply(kobe[,c(7,11:12)], function(x) xtabs(~ x + kobe$shot_made_flag))
+list.of.xtabs
+```
+
+
+#Chi-sq test for variables independence
+null: the 2 categorical variables are independent.
+```{r chi-sq_indep}
+#action_type and combined_shot_type
+tbl.1<-table(kobe$action_type, kobe$combined_shot_type)
+chisq.test(tbl.1) 
+
+#shot_zone_area and shot_zone_range
+tbl.2<-table(kobe$shot_zone_area, kobe$shot_zone_range)
+chisq.test(tbl.2) 
+
+#shot_zone_area and shot_zone_basic
+tbl.3<-table(kobe$shot_zone_area, kobe$shot_zone_basic)
+chisq.test(tbl.3) 
+
+#shot_zone_range and shot_zone_basic
+tbl.4<-table(kobe$shot_zone_range, kobe$shot_zone_basic)
+chisq.test(tbl.4) 
+```
+
+
+
+
+##logistic model
+```{r base-model}
+#shot_made_flag to distance, playoffs and coordinations
+glm.fit<-glm(shot_made_flag~lat+loc_x+loc_y+lon+playoffs+shot_distance+shot_zone_area+shot_zone_basic+shot_zone_range,family=binomial(link="logit"),data=kobe)
+
+summary(glm.fit)
+
+```
+
+VIF
+Not very useful in logistic regression, typically notr performed for mixed data set with categorical variables.
+
+##Model Selection(s): Stepwise 
+Both stepwise models resulted in the same AIC and predictors. Since the question stated that playoffs is a factor in him making the shot, therefore the prediction should use the base.logit (not the two models shown below)
+```{r stepwise}
+#Stepwise based on the first logit regression
+stepwise<- stepAIC(glm.fit,direction="both",trace = FALSE)
+summary(stepwise)
+
+```
+
+##Odds Ratio
+```{r odds-ratio}
+
+#odds ratio calculation using library(epiDisplay)
+#based on the first logit function
+exp(cbind("Odds ratio" = coef(stepwise), confint.default(stepwise, level = 0.95)))   
+
+```
+
+LDA is not performed for logistic regression model.
+
+
+##Prediction
+```{r Prediction}
+#load the project2Pred.xlsx
+pred_kobe <- read_excel("C:\\Users\\Yat\\Documents\\MSDS\\MSDS 6372\\Project 2\\project2Pred.xlsx")
+#Take out an ID column from when data was imported
+pred_kobe<-pred_kobe[,c(2:29)]
+
+#Re-code the character columns into factors
+pred_kobe<-as.data.frame(unclass(pred_kobe))
+pred_kobe$shot_made_flag<-as.factor(pred_kobe$shot_made_flag)
+pred_kobe$shot_type<-as.factor(pred_kobe$shot_type)
+pred_kobe$shot_zone_area<-as.factor(pred_kobe$shot_zone_area)
+pred_kobe$shot_zone_basic<-as.factor(pred_kobe$shot_zone_basic)
+pred_kobe$shot_zone_range<-as.factor(pred_kobe$shot_zone_range)
+pred_kobe$game_date<-as.factor(pred_kobe$game_date)
+pred_kobe$season<-as.factor(pred_kobe$season)
+pred_kobe$period<-as.factor(pred_kobe$period) #change period into factor?
+pred_kobe$playoffs<-as.factor(pred_kobe$playoffs)
+
+#subsetting variables (sans IDs)
+pred_kobe<-pred_kobe[,c(1:2,5:20,22:25,27:28)]
+pred_kobe<-na.omit(pred_kobe)
+
+
+#data check
+head(pred_kobe)
+str(pred_kobe)
+
+#dataframe for the shot_made_flag column in the pred_kobe
+pred_shot_made_flag<-pred_kobe
+
+#what library to use for AUC, Mis-Classification Rate, Sensitivity, Specificity and objective / loss function
+predictions <- predict(stepwise, pred_shot_made_flag, type="response")
+predictions<-as.data.frame(ifelse(predictions>0.5,"1","0"))
+colnames(predictions) <- "Predicted shot_made_flag"
+
+
+
+#actual and predicted values from model
+threshold=0.5
+predicted_values<-ifelse(predict(stepwise,type="response")>threshold,1,0)
+
+actual_values<-stepwise$y
+
+
+#confusion matrix using the training set
+conf_matrix<-table(predicted_values,actual_values)
+conf_matrix
+
+#Sensitivity of the model
+sensitivity(conf_matrix)
+#specificity of the model
+specificity(conf_matrix)
+
+predicted_prob<-predict(stepwise,type="response")
+roccurve <- roc(actual_values, predicted_prob)
+plot(roccurve)
+
+#AUC 
+auc(roccurve)
+```
+
+
+```{r FAMD}
+df<-kobe[,c(1:9,11:17,21,23,24)]
+res.famd <- FAMD(df, graph = FALSE)
+
+#proportion of variances retained by the different dimensions
+eig.val <- get_eigenvalue(res.famd)
+
+#Scree plot
+fviz_screeplot(res.famd)
+
+#extract the results for variables
+variables<- get_famd_var(res.famd)
+
+# Coordinates of variables
+head(variables$coord)
+# Cos2: quality of representation on the factore map
+head(variables$cos2)
+# Contributions to the  dimensions
+head(variables$contrib)
+
+# Plot of variables
+fviz_famd_var(res.famd, repel = TRUE)
+# Contribution to the first dimension
+fviz_contrib(res.famd, "var", axes = 1)
+# Contribution to the second dimension
+fviz_contrib(res.famd, "var", axes = 2)
+
+#quantitative variables
+quanti.var <- get_famd_var(res.famd, "quanti.var")
+quanti.var 
+
+#plot quantitative variables
+fviz_famd_var(res.famd, "quanti.var", repel = TRUE, col.var = "black")
+#highlighting the most contributing quantitative variables
+fviz_famd_var(res.famd, "quanti.var", col.var = "contrib", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+
+#qualitative variables
+quali.var <- get_famd_var(res.famd, "quali.var")
+quali.var
+
+#plot quantitative variables
+fviz_famd_var(res.famd, "quali.var", repel = TRUE, col.var = "black")
+#highlighting the most contributing quantitative variables
+fviz_famd_var(res.famd, "quali.var", col.var = "contrib", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), repel = TRUE)
+```
+
+
+
